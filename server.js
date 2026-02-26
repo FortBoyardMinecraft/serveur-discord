@@ -5,104 +5,79 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// --- BASE DE DONNÉES EN MÉMOIRE ---
-let db = {
-    users: [],    // {id, username, password, socketId}
-    squads: [],   // {id, name, owner, members:[], channels:[{id, name, type, messages:[]}], roles:[]}
-    privates: []  // {id, messages:[]}
-};
+let users = []; // {id, username, password, socketId, friends:[]}
+let squads = []; // {id, name, owner, members:[], channels:[]}
 
 io.on('connection', (socket) => {
-    console.log('📡 Liaison établie:', socket.id);
-
     // --- AUTHENTIFICATION ---
     socket.on('register', (data) => {
         const id = "PLT-" + Math.floor(1000 + Math.random() * 9000);
-        const newUser = { id, username: data.username, password: data.password, socketId: socket.id };
-        db.users.push(newUser);
+        const newUser = { id, username: data.username, password: data.password, socketId: socket.id, friends: [] };
+        users.push(newUser);
         socket.emit('auth-success', { id, username: data.username });
     });
 
     socket.on('login', (data) => {
-        const user = db.users.find(u => u.username === data.username && u.password === data.password);
+        const user = users.find(u => u.username === data.username && u.password === data.password);
         if (user) {
             user.socketId = socket.id;
             socket.emit('auth-success', { id: user.id, username: user.username });
-        } else {
-            socket.emit('auth-error', "Accès refusé : Identifiants invalides.");
+            // Envoyer ses données au réveil
+            socket.emit('sync-data', { 
+                friends: users.filter(u => user.friends.includes(u.id)),
+                squads: squads.filter(s => s.members.includes(user.id))
+            });
+        } else { socket.emit('auth-error', "Identifiants invalides"); }
+    });
+
+    // --- SYSTÈME D'AMIS ---
+    socket.on('add-friend', (data) => {
+        const me = users.find(u => u.id === data.myId);
+        const target = users.find(u => u.id === data.targetId);
+        if (target && me && !me.friends.includes(target.id)) {
+            me.friends.push(target.id);
+            target.friends.push(me.id);
+            socket.emit('update-list', { type: 'friends', data: users.filter(u => me.friends.includes(u.id)) });
+            io.to(target.socketId).emit('update-list', { type: 'friends', data: users.filter(u => target.friends.includes(u.id)) });
         }
     });
 
-    // --- GESTION DES SQUADS ---
+    // --- SYSTÈME DE SQUAD ---
     socket.on('create-squad', (data) => {
         const newSquad = {
             id: "SQD-" + Date.now(),
             name: data.name,
-            owner: data.userId,
-            members: [data.userId],
-            channels: [
-                { id: "chan-1", name: "général", type: "text", messages: [] },
-                { id: "voc-1", name: "Salon Vocal 1", type: "voice" }
-            ],
-            roles: [{ name: "Commandant", color: "#00f2ff", users: [data.userId] }]
+            owner: data.myId,
+            members: [data.myId],
+            channels: [{ id: "c1", name: "général", type: "text", messages: [] }]
         };
-        db.squads.push(newSquad);
+        squads.push(newSquad);
         socket.join(newSquad.id);
-        io.emit('sync-squads', db.squads.filter(s => s.members.includes(data.userId)));
+        socket.emit('update-list', { type: 'squads', data: squads.filter(s => s.members.includes(data.myId)) });
     });
 
-    socket.on('invite-user', (data) => {
-        const squad = db.squads.find(s => s.id === data.squadId);
-        const user = db.users.find(u => u.id === data.targetId);
-        if (squad && user && !squad.members.includes(data.targetId)) {
-            squad.members.push(data.targetId);
-            // On prévient l'invité s'il est connecté
-            io.to(user.socketId).emit('new-invitation', { squadName: squad.name });
-            io.emit('sync-squads', db.squads); 
+    socket.on('invite-to-squad', (data) => {
+        const squad = squads.find(s => s.id === data.squadId);
+        const target = users.find(u => u.id === data.targetId);
+        if (squad && target) {
+            squad.members.push(target.id);
+            io.to(target.socketId).emit('update-list', { type: 'squads', data: squads.filter(s => s.members.includes(target.id)) });
         }
     });
 
-    // --- SALONS & MESSAGES ---
-    socket.on('join-room', (roomId) => {
-        socket.join(roomId);
-        // Envoyer l'historique
-        let history = [];
-        db.squads.forEach(s => {
-            let c = s.channels.find(chan => (s.id + '-' + chan.id) === roomId);
-            if(c) history = c.messages;
-        });
-        socket.emit('chat-history', history);
+    // --- CHAT & SALONS ---
+    socket.on('join-room', (room) => { socket.join(room); });
+
+    socket.on('send-msg', (data) => {
+        io.to(data.room).emit('render-msg', data);
     });
 
-    socket.on('send-chat-message', (data) => {
-        // Sauvegarde dans l'historique du serveur
-        db.squads.forEach(s => {
-            let c = s.channels.find(chan => (s.id + '-' + chan.id) === data.room);
-            if(c) c.messages.push(data);
-        });
-        io.to(data.room).emit('receive-chat-message', data);
-    });
-
-    // --- AJOUT DE SALON ---
-    socket.on('add-channel', (data) => {
-        const squad = db.squads.find(s => s.id === data.squadId);
-        if(squad) {
-            const newChan = { id: "chan-" + Date.now(), name: data.name, type: data.type, messages: [] };
-            squad.channels.push(newChan);
-            io.to(data.squadId).emit('squad-updated', squad);
+    socket.on('add-chan', (data) => {
+        const squad = squads.find(s => s.id === data.squadId);
+        if (squad) {
+            squad.channels.push({ id: "c"+Date.now(), name: data.name, type: data.type, messages: [] });
+            io.to(squad.id).emit('squad-refresh', squad);
         }
     });
-
-    socket.on('disconnect', () => {
-        console.log('❌ Déconnexion pilote');
-    });
 });
-
-server.listen(3000, () => {
-    console.log(`
-    ======================================
-    🚀 NEXUS CORE V7 - SYSTÈME ACTIF
-    Port: 3000 | Statut: Opérationnel
-    ======================================
-    `);
-});
+server.listen(3000);
