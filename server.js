@@ -99,7 +99,7 @@ io.on("connection", socket => {
             if(fSocket) sync(friend);
         }
     });
-
+    
     // --- CHAT LOGIC ---
     socket.on("join-room", room => {
         socket.join(room);
@@ -137,7 +137,7 @@ io.on("connection", socket => {
     });
 });
 
-// --- SIGNALING POUR APPELS ---
+// --- SIGNALING POUR APPELS (DOIT ÊTRE ICI) ---
     socket.on("call-user", ({ to, offer, from }) => {
         const target = [...users.values()].find(u => u.id === to);
         if (target) {
@@ -158,5 +158,7 @@ io.on("connection", socket => {
             io.to(target.socketId).emit("ice-candidate", { candidate });
         }
     });
+
+});
 
 server.listen(PORT, () => console.log("🚀 NEXUS SYSTEM ONLINE"));
