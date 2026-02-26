@@ -93,9 +93,16 @@ io.on("connection", socket => {
         }
     });
 
-    socket.on("join-room", room => {
-        socket.join(room);
-        const history = messagesHistory.get(room) || [];
+    socket.on("join-room", newRoom => {
+        // Quitter tous les anciens salons sauf son propre salon personnel
+        socket.rooms.forEach(room => {
+            if (room !== socket.id) socket.leave(room);
+        });
+
+        socket.join(newRoom);
+        
+        // Envoyer l'historique du nouveau salon
+        const history = messagesHistory.get(newRoom) || [];
         socket.emit("chat-history", history);
     });
 
