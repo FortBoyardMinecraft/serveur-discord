@@ -4,39 +4,50 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+// Simulation de base de données (À remplacer par Supabase pour du permanent)
+let users = []; 
 
 io.on('connection', (socket) => {
-    console.log('Client connecté:', socket.id);
+    console.log('Nouveau client:', socket.id);
 
-    // Rejoindre une salle privée
-    socket.on('join-private-chat', (roomId) => {
-        // On quitte les autres salles (sauf sa propre salle par défaut)
-        for (const room of socket.rooms) {
-            if (room !== socket.id) socket.leave(room);
+    // --- INSCRIPTION ---
+    socket.on('register', (data) => {
+        const existing = users.find(u => u.username === data.username);
+        if (existing) {
+            socket.emit('auth-error', 'Ce pseudo est déjà pris.');
+        } else {
+            const newUser = { 
+                id: Math.random().toString(36).substring(2, 9), 
+                username: data.username, 
+                password: data.password 
+            };
+            users.push(newUser);
+            socket.emit('auth-success', { id: newUser.id, username: newUser.username });
         }
+    });
+
+    // --- CONNEXION ---
+    socket.on('login', (data) => {
+        const user = users.find(u => u.username === data.username && u.password === data.password);
+        if (user) {
+            socket.emit('auth-success', { id: user.id, username: user.username });
+        } else {
+            socket.emit('auth-error', 'Identifiants incorrects.');
+        }
+    });
+
+    // --- MESSAGERIE PRIVÉE ---
+    socket.on('join-private-chat', (roomId) => {
         socket.join(roomId);
-        console.log(`L'utilisateur ${socket.id} a rejoint : ${roomId}`);
     });
 
-    // Envoyer le message
     socket.on('private-message', (data) => {
-        console.log(`Message reçu pour ${data.room}`);
+        // Envoie à tous ceux dans la room (le sender + le destinataire)
         io.to(data.room).emit('receive-private-message', data);
-    });
-
-    socket.on('disconnect', () => {
-        console.log('Client déconnecté');
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Serveur prêt sur le port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Serveur sur port ${PORT}`));
