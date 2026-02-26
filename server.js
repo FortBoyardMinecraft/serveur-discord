@@ -5,79 +5,68 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-let users = []; // {id, username, password, socketId, friends:[]}
-let squads = []; // {id, name, owner, members:[], channels:[]}
+let users = {}; // Stockage des profils {id: {username, color, role, friends:[]}}
+let squads = []; // {id, name, members:[], channels:[]}
 
 io.on('connection', (socket) => {
-    // --- AUTHENTIFICATION ---
+    // --- AUTH & PERSONNALISATION ---
     socket.on('register', (data) => {
         const id = "PLT-" + Math.floor(1000 + Math.random() * 9000);
-        const newUser = { id, username: data.username, password: data.password, socketId: socket.id, friends: [] };
-        users.push(newUser);
-        socket.emit('auth-success', { id, username: data.username });
+        users[id] = { 
+            id, 
+            username: data.username, 
+            color: data.color || "#00f2ff", 
+            role: "Pilote", 
+            socketId: socket.id,
+            friends: [] 
+        };
+        socket.emit('auth-success', users[id]);
     });
 
     socket.on('login', (data) => {
-        const user = users.find(u => u.username === data.username && u.password === data.password);
+        const user = Object.values(users).find(u => u.username === data.username);
         if (user) {
             user.socketId = socket.id;
-            socket.emit('auth-success', { id: user.id, username: user.username });
-            // Envoyer ses données au réveil
+            socket.emit('auth-success', user);
             socket.emit('sync-data', { 
-                friends: users.filter(u => user.friends.includes(u.id)),
+                friends: user.friends.map(fid => users[fid]),
                 squads: squads.filter(s => s.members.includes(user.id))
             });
-        } else { socket.emit('auth-error', "Identifiants invalides"); }
-    });
-
-    // --- SYSTÈME D'AMIS ---
-    socket.on('add-friend', (data) => {
-        const me = users.find(u => u.id === data.myId);
-        const target = users.find(u => u.id === data.targetId);
-        if (target && me && !me.friends.includes(target.id)) {
-            me.friends.push(target.id);
-            target.friends.push(me.id);
-            socket.emit('update-list', { type: 'friends', data: users.filter(u => me.friends.includes(u.id)) });
-            io.to(target.socketId).emit('update-list', { type: 'friends', data: users.filter(u => target.friends.includes(u.id)) });
         }
     });
 
-    // --- SYSTÈME DE SQUAD ---
+    // --- SQUADS & SALONS ---
     socket.on('create-squad', (data) => {
         const newSquad = {
             id: "SQD-" + Date.now(),
             name: data.name,
-            owner: data.myId,
             members: [data.myId],
-            channels: [{ id: "c1", name: "général", type: "text", messages: [] }]
+            channels: [{ id: "c1", name: "général", type: "text" }]
         };
         squads.push(newSquad);
         socket.join(newSquad.id);
-        socket.emit('update-list', { type: 'squads', data: squads.filter(s => s.members.includes(data.myId)) });
-    });
-
-    socket.on('invite-to-squad', (data) => {
-        const squad = squads.find(s => s.id === data.squadId);
-        const target = users.find(u => u.id === data.targetId);
-        if (squad && target) {
-            squad.members.push(target.id);
-            io.to(target.socketId).emit('update-list', { type: 'squads', data: squads.filter(s => s.members.includes(target.id)) });
-        }
-    });
-
-    // --- CHAT & SALONS ---
-    socket.on('join-room', (room) => { socket.join(room); });
-
-    socket.on('send-msg', (data) => {
-        io.to(data.room).emit('render-msg', data);
+        io.emit('refresh-squads', squads);
     });
 
     socket.on('add-chan', (data) => {
         const squad = squads.find(s => s.id === data.squadId);
-        if (squad) {
-            squad.channels.push({ id: "c"+Date.now(), name: data.name, type: data.type, messages: [] });
-            io.to(squad.id).emit('squad-refresh', squad);
+        if(squad) {
+            squad.channels.push({ id: "c"+Date.now(), name: data.name, type: data.type });
+            io.to(squad.id).emit('squad-update', squad);
         }
     });
+
+    socket.on('join-room', (room) => { socket.join(room); });
+
+    // --- MESSAGERIE AVEC RÔLES ---
+    socket.on('send-msg', (data) => {
+        const sender = users[data.senderId];
+        io.to(data.room).emit('render-msg', {
+            ...data,
+            username: sender.username,
+            color: sender.color,
+            role: sender.role
+        });
+    });
 });
-server.listen(3000);
+server.listen(3000, () => console.log("NEXUS CORE V9 ONLINE"));
