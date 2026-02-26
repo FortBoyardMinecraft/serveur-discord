@@ -137,4 +137,26 @@ io.on("connection", socket => {
     });
 });
 
+// --- SIGNALING POUR APPELS ---
+    socket.on("call-user", ({ to, offer, from }) => {
+        const target = [...users.values()].find(u => u.id === to);
+        if (target) {
+            io.to(target.socketId).emit("incoming-call", { offer, from });
+        }
+    });
+
+    socket.on("answer-call", ({ to, answer }) => {
+        const target = [...users.values()].find(u => u.id === to);
+        if (target) {
+            io.to(target.socketId).emit("call-answered", { answer });
+        }
+    });
+
+    socket.on("ice-candidate", ({ to, candidate }) => {
+        const target = [...users.values()].find(u => u.id === to);
+        if (target) {
+            io.to(target.socketId).emit("ice-candidate", { candidate });
+        }
+    });
+
 server.listen(PORT, () => console.log("🚀 NEXUS SYSTEM ONLINE"));
