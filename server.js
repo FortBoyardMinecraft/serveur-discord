@@ -44,20 +44,23 @@ io.on("connection", socket => {
         }
     });
 
-    socket.on("update-profile", (data) => {
-        const u = [...users.values()].find(usr => usr.id === data.myId);
-        if(u) {
-            u.avatar = data.avatar;
-            u.bio = data.bio;
-            u.color = data.color;
-            sync(u);
-            // On refresh tout le monde pour voir les changements de couleurs/avatars
-            [...users.values()].forEach(all => {
-                const s = io.sockets.sockets.get(all.socketId);
-                if(s) sync(all);
-            });
-        }
-    });
+socket.on("update-profile", (data) => {
+    // On cherche l'utilisateur précis par son ID unique PLT-XXXX
+    const userToUpdate = [...users.values()].find(u => u.id === data.myId);
+    
+    if (userToUpdate) {
+      userToUpdate.avatar = data.avatar;
+      userToUpdate.bio = data.bio;
+      userToUpdate.color = data.color;
+
+      // CRUCIAL : On prévient TOUS les connectés que les données ont changé
+      // Mais on ne change pas LEUR identité à eux.
+      [...users.values()].forEach(u => {
+        const s = io.sockets.sockets.get(u.socketId);
+        if(s) sync(u); // On renvoie un nexus-sync personnalisé à chaque socket
+      });
+    }
+  });
 
     socket.on("join-room", room => {
         socket.join(room);
