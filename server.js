@@ -27,6 +27,16 @@ io.on('connection', (socket) => {
         });
     });
 
+// server.js - Extrait de la partie socket.on
+socket.on('send-message', (data) => {
+    io.emit('receive-message', {
+        user: data.user,
+        text: data.text,
+        avatar: data.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=Felix", // Avatar par défaut
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+});
+    
     socket.on('disconnect', () => {
         console.log('Un ami s’est déconnecté.');
     });
