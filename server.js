@@ -54,7 +54,6 @@ io.on("connection", socket => {
             u.avatar = data.avatar;
             u.bio = data.bio;
             u.color = data.color;
-            // On refresh tout le monde pour que les changements soient visibles partout
             [...users.values()].forEach(activeUser => {
                 const s = io.sockets.sockets.get(activeUser.socketId);
                 if(s) sync(activeUser);
@@ -62,13 +61,10 @@ io.on("connection", socket => {
         }
     });
 
-    // --- SQUADS LOGIC ---
     socket.on("create-squad", ({ myId, name }) => {
         const squadId = "SQ-" + Math.floor(1000 + Math.random() * 9000);
         const newSquad = { 
-            id: squadId, 
-            name: name, 
-            members: [myId], 
+            id: squadId, name: name, members: [myId], 
             channels: [{ id: "gen", name: "general" }] 
         };
         squads.set(squadId, newSquad);
@@ -82,12 +78,9 @@ io.on("connection", socket => {
             sq.members.push(myId);
             const u = [...users.values()].find(usr => usr.id === myId);
             sync(u);
-        } else {
-            socket.emit("error", "Squad introuvable");
         }
     });
 
-    // --- FRIENDS LOGIC ---
     socket.on("add-friend", ({ myId, targetId }) => {
         const me = [...users.values()].find(u => u.id === myId);
         const friend = [...users.values()].find(u => u.id === targetId);
@@ -99,8 +92,7 @@ io.on("connection", socket => {
             if(fSocket) sync(friend);
         }
     });
-    
-    // --- CHAT LOGIC ---
+
     socket.on("join-room", room => {
         socket.join(room);
         const history = messagesHistory.get(room) || [];
@@ -110,20 +102,36 @@ io.on("connection", socket => {
     socket.on("send-msg", d => {
         const u = [...users.values()].find(usr => usr.id === d.senderId);
         if(!u) return;
-
         const fullMsg = {
-            room: d.room,
-            text: d.text,
+            room: d.room, text: d.text,
             time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
             sender: { username: u.username, color: u.color, avatar: u.avatar }
         };
-
         if(!messagesHistory.has(d.room)) messagesHistory.set(d.room, []);
-        const roomMsgs = messagesHistory.get(d.room);
-        roomMsgs.push(fullMsg);
-        if(roomMsgs.length > 50) roomMsgs.shift();
-
+        messagesHistory.get(d.room).push(fullMsg);
         io.to(d.room).emit("new-msg", fullMsg);
+    });
+
+    // --- SYSTÈME D'APPELS ---
+    socket.on("call-user", (data) => {
+        const target = [...users.values()].find(u => u.id === data.to);
+        if (target && target.socketId) {
+            io.to(target.socketId).emit("incoming-call", { offer: data.offer, from: data.from });
+        }
+    });
+
+    socket.on("answer-call", (data) => {
+        const target = [...users.values()].find(u => u.id === data.to);
+        if (target && target.socketId) {
+            io.to(target.socketId).emit("call-answered", { answer: data.answer });
+        }
+    });
+
+    socket.on("ice-candidate", (data) => {
+        const target = [...users.values()].find(u => u.id === data.to);
+        if (target && target.socketId) {
+            io.to(target.socketId).emit("ice-candidate", { candidate: data.candidate });
+        }
     });
 
     socket.on("refresh-all", () => {
@@ -135,30 +143,7 @@ io.on("connection", socket => {
         const u = [...users.values()].find(usr => usr.socketId === socket.id);
         if(u) u.status = "offline";
     });
-});
 
-// --- SIGNALING POUR APPELS (DOIT ÊTRE ICI) ---
-    socket.on("call-user", ({ to, offer, from }) => {
-        const target = [...users.values()].find(u => u.id === to);
-        if (target) {
-            io.to(target.socketId).emit("incoming-call", { offer, from });
-        }
-    });
-
-    socket.on("answer-call", ({ to, answer }) => {
-        const target = [...users.values()].find(u => u.id === to);
-        if (target) {
-            io.to(target.socketId).emit("call-answered", { answer });
-        }
-    });
-
-    socket.on("ice-candidate", ({ to, candidate }) => {
-        const target = [...users.values()].find(u => u.id === to);
-        if (target) {
-            io.to(target.socketId).emit("ice-candidate", { candidate });
-        }
-    });
-
-});
+}); // FIN DU IO.ON CONNECTION
 
 server.listen(PORT, () => console.log("🚀 NEXUS SYSTEM ONLINE"));
