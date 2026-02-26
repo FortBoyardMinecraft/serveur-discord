@@ -13,27 +13,26 @@ const io = new Server(server, {
     }
 });
 
+// server.js
 io.on('connection', (socket) => {
-    console.log('Nouvelle connexion d’un ami ! ID:', socket.id);
+    console.log('Client connecté:', socket.id);
 
-    // Écouter quand quelqu'un envoie un message
-    socket.on('send-message', (data) => {
-        console.log('Message reçu:', data);
-        // On renvoie le message à TOUT LE MONDE (y compris l'envoyeur)
-        io.emit('receive-message', {
-            user: data.user,
-            text: data.text,
-            time: new Date().toLocaleTimeString()
+    // Étape 1 : Rejoindre la salle de discussion
+    socket.on('join-private-chat', (roomId) => {
+        // On quitte les anciennes salles pour ne pas recevoir les messages des autres
+        socket.rooms.forEach(room => {
+            if (room !== socket.id) socket.leave(room);
         });
+        
+        socket.join(roomId);
+        console.log(`Socket ${socket.id} a rejoint la room : ${roomId}`);
     });
 
-// server.js - Extrait de la partie socket.on
-socket.on('send-message', (data) => {
-    io.emit('receive-message', {
-        user: data.user,
-        text: data.text,
-        avatar: data.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=Felix", // Avatar par défaut
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    // Étape 2 : Envoyer le message à la salle
+    socket.on('private-message', (data) => {
+        console.log(`Message pour la room ${data.room}: ${data.text}`);
+        // "io.to(data.room)" envoie à tout le monde dans la salle
+        io.to(data.room).emit('receive-private-message', data);
     });
 });
     
