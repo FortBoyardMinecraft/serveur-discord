@@ -6,53 +6,41 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Simulation de base de données (en mémoire)
-let users = []; 
+let users = []; // En mémoire (À lier à Supabase pour le permanent)
 
 io.on('connection', (socket) => {
-    console.log('Nouveau client connecté:', socket.id);
-
-    // --- AUTHENTIFICATION ---
+    // --- AUTH ---
     socket.on('register', (data) => {
-        const existing = users.find(u => u.username === data.username);
-        if (existing) {
-            socket.emit('auth-error', 'Ce pseudo est déjà pris.');
-        } else {
-            const newUser = { 
-                id: Math.random().toString(36).substring(2, 9), 
-                username: data.username, 
-                password: data.password 
-            };
-            users.push(newUser);
-            socket.emit('auth-success', { id: newUser.id, username: newUser.username });
-        }
+        const id = Math.random().toString(36).substring(2, 9);
+        users.push({ id, ...data, socketId: socket.id });
+        socket.emit('auth-success', { id, username: data.username });
     });
 
     socket.on('login', (data) => {
         const user = users.find(u => u.username === data.username && u.password === data.password);
-        if (user) {
+        if (user) { 
+            user.socketId = socket.id;
             socket.emit('auth-success', { id: user.id, username: user.username });
-        } else {
-            socket.emit('auth-error', 'Identifiants incorrects.');
+        } else { socket.emit('auth-error', 'Erreur identifiants'); }
+    });
+
+    // --- GROUPES & INVITATIONS ---
+    socket.on('join-room', (roomId) => { socket.join(roomId); });
+
+    socket.on('invite-to-group', (data) => {
+        // data: { groupName, targetId, creatorName }
+        const target = users.find(u => u.id === data.targetId);
+        if (target) {
+            io.to(target.socketId).emit('group-invitation', data);
         }
     });
 
-    // --- GESTION DES SALONS (PRIVÉS ET GROUPES) ---
-    socket.on('join-room', (roomId) => {
-        socket.join(roomId);
-        console.log(`Socket ${socket.id} a rejoint : ${roomId}`);
-    });
-
-    // --- ENVOI DE MESSAGE (UNIFIÉ) ---
+    // --- MESSAGERIE ---
     socket.on('send-chat-message', (data) => {
-        // data contient : { room, user, text, senderId, avatar, banner, status }
+        // Envoie à tout le monde dans la room
         io.to(data.room).emit('receive-chat-message', data);
-    });
-
-    socket.on('disconnect', () => {
-        console.log('Client déconnecté');
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
+server.listen(PORT, () => console.log(`Serveur Gamer prêt sur ${PORT}`));
