@@ -3,7 +3,13 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+
+const io = new Server(server, { 
+    cors: { 
+        origin: "*", 
+        methods: ["GET", "POST"] 
+    } 
+});
 
 let users = {}; // { username: { password, id, color, bio, logo, role, friends:[] } }
 let squads = [];
