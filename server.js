@@ -4,11 +4,16 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 
+// Configuration CORS pour permettre la connexion depuis ton navigateur
 const io = new Server(server, { 
-    cors: { origin: "*", methods: ["GET", "POST"] } 
+    cors: { 
+        origin: "*", 
+        methods: ["GET", "POST"] 
+    } 
 });
 
-let users = {}; 
+// Stockage en mémoire vive (Attention : s'efface au redémarrage du serveur)
+let users = {};  
 let squads = [];
 
 io.on('connection', (socket) => {
@@ -16,12 +21,19 @@ io.on('connection', (socket) => {
 
     // --- INSCRIPTION ---
     socket.on('register', (data) => {
-        if (users[data.username]) return socket.emit('auth-error', "Pseudo déjà pris.");
+        if (users[data.username]) {
+            return socket.emit('auth-error', "Ce matricule est déjà attribué.");
+        }
         const id = "PLT-" + Math.floor(1000 + Math.random() * 9000);
         users[data.username] = { 
-            id, username: data.username, password: data.password, 
-            color: "#00f2ff", bio: "Pilote Nexus", logo: "👤", 
-            friends: [], socketId: socket.id 
+            id, 
+            username: data.username, 
+            password: data.password, 
+            color: "#00f2ff", 
+            bio: "Pilote Nexus Standard", 
+            logo: "👤", 
+            friends: [], 
+            socketId: socket.id 
         };
         socket.emit('auth-success', users[data.username]);
         console.log(`✅ Nouveau Pilote : ${data.username} [${id}]`);
@@ -31,19 +43,24 @@ io.on('connection', (socket) => {
     socket.on('login', (data) => {
         const u = users[data.username];
         if (u && u.password === data.password) {
-            u.socketId = socket.id;
+            u.socketId = socket.id; // Mise à jour du socket actuel
             socket.emit('auth-success', u);
-            socket.emit('sync-data', { 
-                friends: u.friends.map(fId => Object.values(users).find(usr => usr.id === fId)),
-                squads: squads.filter(s => s.members.includes(u.id))
-            });
-            console.log(`🔑 Connexion : ${u.username}`);
+            
+            // Envoyer les données (amis et squads)
+            sendSyncData(socket, u);
+            console.log(`🔑 Connexion établie : ${u.username}`);
         } else {
-            socket.emit('auth-error', "Identifiants invalides.");
+            socket.emit('auth-error', "Identifiants invalides ou accès refusé.");
         }
     });
 
-    // --- PROFIL ---
+    // --- DEMANDE DE SYNCHRONISATION (MANUELLE) ---
+    socket.on('get-my-data', (data) => {
+        const u = users[data.username];
+        if (u) sendSyncData(socket, u);
+    });
+
+    // --- MISE À JOUR DU PROFIL ---
     socket.on('update-profile', (data) => {
         const u = users[data.username];
         if (u) {
@@ -55,8 +72,9 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- AMIS ---
+    // --- SYSTÈME D'AMIS (LOGIQUE BLINDÉE) ---
     socket.on('add-friend', (data) => {
+        console.log(`📡 Tentative de liaison : ${data.myId} -> ${data.targetId}`);
         const me = Object.values(users).find(u => u.id === data.myId);
         const target = Object.values(users).find(u => u.id === data.targetId);
 
@@ -65,24 +83,24 @@ io.on('connection', (socket) => {
                 me.friends.push(target.id);
                 target.friends.push(me.id);
                 
-                // Refresh pour 'me'
-                socket.emit('sync-data', { 
-                    friends: me.friends.map(fId => Object.values(users).find(usr => usr.id === fId)),
-                    squads: squads.filter(s => s.members.includes(me.id))
-                });
-                // Refresh pour 'target'
-                io.to(target.socketId).emit('sync-data', { 
-                    friends: target.friends.map(fId => Object.values(users).find(usr => usr.id === fId)),
-                    squads: squads.filter(s => s.members.includes(target.id))
-                });
+                // Mettre à jour l'envoyeur
+                sendSyncData(socket, me);
+                
+                // Mettre à jour le destinataire s'il est en ligne
+                const targetSocket = io.sockets.sockets.get(target.socketId);
+                if (targetSocket) {
+                    sendSyncData(targetSocket, target);
+                }
+                console.log(`🤝 Liaison établie : ${me.username} <-> ${target.username}`);
             }
         } else {
-            socket.emit('auth-error', "ID Pilote introuvable.");
+            socket.emit('auth-error', "ID Pilote introuvable ou incorrect.");
         }
     });
 
-    // --- SQUADS ---
+    // --- CRÉATION DE SQUAD ---
     socket.on('create-squad', (data) => {
+        console.log(`🏗️ Création Squad : ${data.name}`);
         const newSquad = {
             id: "SQD-" + Date.now(),
             name: data.name,
@@ -93,25 +111,45 @@ io.on('connection', (socket) => {
         socket.join(newSquad.id);
         
         const me = Object.values(users).find(u => u.id === data.myId);
-        socket.emit('sync-data', { 
-            friends: me.friends.map(fId => Object.values(users).find(usr => usr.id === fId)),
-            squads: squads.filter(s => s.members.includes(me.id))
-        });
+        if (me) sendSyncData(socket, me);
     });
 
-    // --- MESSAGES ---
-    socket.on('join-room', (room) => socket.join(room));
+    // --- MESSAGERIE ---
+    socket.on('join-room', (room) => {
+        socket.join(room);
+        console.log(`🚪 ${socket.id} a rejoint : ${room}`);
+    });
     
     socket.on('send-msg', (data) => {
         const sender = Object.values(users).find(u => u.id === data.senderId);
-        io.to(data.room).emit('render-msg', { ...data, sender });
+        if (sender) {
+            io.to(data.room).emit('render-msg', { ...data, sender });
+        }
     });
 
-    socket.on('disconnect', () => console.log("❌ Signal perdu"));
+    socket.on('disconnect', () => {
+        console.log("❌ Signal perdu pour un pilote.");
+    });
 });
 
-server.listen(3000, () => {
-    console.log("--------------------------------------");
-    console.log("🚀 NEXUS V12 ENGINE READY ON PORT 3000");
-    console.log("--------------------------------------");
+// Fonction utilitaire pour synchroniser les listes
+function sendSyncData(targetSocket, userObj) {
+    const friendsData = userObj.friends.map(fId => {
+        const f = Object.values(users).find(usr => usr.id === fId);
+        return f ? { id: f.id, username: f.username, logo: f.logo, color: f.color } : null;
+    }).filter(x => x !== null);
+
+    const squadsData = squads.filter(s => s.members.includes(userObj.id));
+
+    targetSocket.emit('sync-data', { 
+        friends: friendsData, 
+        squads: squadsData 
+    });
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log("-----------------------------------------");
+    console.log(`🚀 NEXUS V12 ENGINE READY ON PORT ${PORT}`);
+    console.log("-----------------------------------------");
 });
