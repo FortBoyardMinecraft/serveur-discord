@@ -6,13 +6,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Simulation de base de données (À remplacer par Supabase pour du permanent)
+// Simulation de base de données (en mémoire)
 let users = []; 
 
 io.on('connection', (socket) => {
-    console.log('Nouveau client:', socket.id);
+    console.log('Nouveau client connecté:', socket.id);
 
-    // --- INSCRIPTION ---
+    // --- AUTHENTIFICATION ---
     socket.on('register', (data) => {
         const existing = users.find(u => u.username === data.username);
         if (existing) {
@@ -28,7 +28,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- CONNEXION ---
     socket.on('login', (data) => {
         const user = users.find(u => u.username === data.username && u.password === data.password);
         if (user) {
@@ -38,16 +37,22 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- MESSAGERIE PRIVÉE ---
-    socket.on('join-private-chat', (roomId) => {
+    // --- GESTION DES SALONS (PRIVÉS ET GROUPES) ---
+    socket.on('join-room', (roomId) => {
         socket.join(roomId);
+        console.log(`Socket ${socket.id} a rejoint : ${roomId}`);
     });
 
-    socket.on('private-message', (data) => {
-        // Envoie à tous ceux dans la room (le sender + le destinataire)
-        io.to(data.room).emit('receive-private-message', data);
+    // --- ENVOI DE MESSAGE (UNIFIÉ) ---
+    socket.on('send-chat-message', (data) => {
+        // data contient : { room, user, text, senderId, avatar, banner, status }
+        io.to(data.room).emit('receive-chat-message', data);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client déconnecté');
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Serveur sur port ${PORT}`));
+server.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
