@@ -5,39 +5,34 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 
-// Configuration de Socket.io pour autoriser les connexions externes
 const io = new Server(server, {
     cors: {
-        origin: "*", // Permet à ton app Chromium de se connecter
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
 
-// server.js
 io.on('connection', (socket) => {
     console.log('Client connecté:', socket.id);
 
-    // Étape 1 : Rejoindre la salle de discussion
+    // Rejoindre une salle privée
     socket.on('join-private-chat', (roomId) => {
-        // On quitte les anciennes salles pour ne pas recevoir les messages des autres
-        socket.rooms.forEach(room => {
+        // On quitte les autres salles (sauf sa propre salle par défaut)
+        for (const room of socket.rooms) {
             if (room !== socket.id) socket.leave(room);
-        });
-        
+        }
         socket.join(roomId);
-        console.log(`Socket ${socket.id} a rejoint la room : ${roomId}`);
+        console.log(`L'utilisateur ${socket.id} a rejoint : ${roomId}`);
     });
 
-    // Étape 2 : Envoyer le message à la salle
+    // Envoyer le message
     socket.on('private-message', (data) => {
-        console.log(`Message pour la room ${data.room}: ${data.text}`);
-        // "io.to(data.room)" envoie à tout le monde dans la salle
+        console.log(`Message reçu pour ${data.room}`);
         io.to(data.room).emit('receive-private-message', data);
     });
-});
-    
+
     socket.on('disconnect', () => {
-        console.log('Un ami s’est déconnecté.');
+        console.log('Client déconnecté');
     });
 });
 
