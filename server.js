@@ -47,7 +47,7 @@ io.on('connection', (socket) => {
     });
 
     // --- SQUADS & SALONS ---
-socket.on('add-friend', (data) => {
+    socket.on('add-friend', (data) => {
         console.log(`📡 Tentative d'ajout d'ami : de ${data.myId} vers ${data.targetId}`);
         const me = Object.values(users).find(u => u.id === data.myId);
         const target = Object.values(users).find(u => u.id === data.targetId);
