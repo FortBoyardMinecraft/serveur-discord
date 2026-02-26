@@ -199,6 +199,7 @@ socket.on("disconnect",()=>{
 
 /* ================= START ================= */
 
-server.listen(3000,()=>{
-    console.log("🚀 NEXUS CORE ONLINE");
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log("🚀 NEXUS CORE ONLINE on port", PORT);
 });
